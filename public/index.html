@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>독서토론 — JARVIS</title>
+  <link rel="stylesheet" href="style.css" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&display=swap" rel="stylesheet" />
+</head>
+<body>
+
+  <!-- 배경 그리드 -->
+  <div class="grid-bg"></div>
+  <div class="scan-line"></div>
+
+  <!-- 상단 헤더 -->
+  <header class="hud-header">
+    <div class="hud-corner tl"></div>
+    <div class="hud-corner tr"></div>
+    <span class="hud-title">JARVIS<span class="hud-sub"> — 독서토론 시스템</span></span>
+    <div class="hud-status">
+      <span class="status-dot" id="statusDot"></span>
+      <span id="statusText">오프라인</span>
+    </div>
+  </header>
+
+  <!-- 메인 레이아웃 -->
+  <main class="main-layout">
+
+    <!-- 좌측 패널 — 설정 -->
+    <aside class="side-panel left-panel">
+      <div class="panel-label">// PERSONA</div>
+      <select id="personaSelect" class="hud-select">
+        <option value="">— 선택 —</option>
+      </select>
+
+      <div class="panel-label" style="margin-top:1.5rem;">// BOOK CONTEXT</div>
+      <select id="bookSelect" class="hud-select">
+        <option value="">— 없음 —</option>
+      </select>
+
+      <button id="initBtn" class="hud-btn">
+        <span>▶ 세션 시작</span>
+      </button>
+
+      <div class="panel-divider"></div>
+
+      <div class="panel-label">// SESSION LOG</div>
+      <div id="sessionLog" class="session-log"></div>
+    </aside>
+
+    <!-- 중앙 — JARVIS 오브 -->
+    <section class="center-panel">
+      <div class="orb-container" id="orbContainer">
+        <!-- 외부 링들 -->
+        <div class="ring ring-outer"></div>
+        <div class="ring ring-mid"></div>
+        <div class="ring ring-inner"></div>
+
+        <!-- 육각형 HUD -->
+        <div class="hex-grid">
+          <div class="hex-cell"></div>
+          <div class="hex-cell"></div>
+          <div class="hex-cell"></div>
+          <div class="hex-cell"></div>
+          <div class="hex-cell"></div>
+          <div class="hex-cell"></div>
+        </div>
+
+        <!-- 중심 오브 -->
+        <div class="orb-core" id="orbCore">
+          <div class="orb-pulse"></div>
+          <div class="orb-icon" id="orbIcon">◈</div>
+        </div>
+
+        <!-- 음성 파형 -->
+        <div class="waveform" id="waveform">
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+          <span></span><span></span><span></span><span></span><span></span>
+        </div>
+      </div>
+
+      <!-- 상태 텍스트 -->
+      <div class="state-label" id="stateLabel">시스템 준비 중</div>
+
+      <!-- 마이크 버튼 -->
+      <button class="mic-btn" id="micBtn" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+          <line x1="12" y1="19" x2="12" y2="23"/>
+          <line x1="8" y1="23" x2="16" y2="23"/>
+        </svg>
+        <span>말하기</span>
+      </button>
+    </section>
+
+    <!-- 우측 패널 — 대화 내용 -->
+    <aside class="side-panel right-panel">
+      <div class="panel-label">// TRANSCRIPT</div>
+      <div id="transcript" class="transcript-area"></div>
+    </aside>
+
+  </main>
+
+  <!-- 하단 응답 텍스트 -->
+  <div class="response-bar" id="responseBar">
+    <div class="response-text" id="responseText">페르소나와 책을 선택하고 세션을 시작하세요.</div>
+  </div>
+
+  <script src="main.js"></script>
+</body>
+</html>
