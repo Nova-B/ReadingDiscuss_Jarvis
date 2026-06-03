@@ -1,55 +1,167 @@
-/* ===== 상태 관리 ===== */
-const State = {
-  IDLE: 'idle',
-  LISTENING: 'listening',
-  THINKING: 'thinking',
-  SPEAKING: 'speaking',
-};
-
+/* ===== 상태 ===== */
+const State = { IDLE: 'idle', LISTENING: 'listening', THINKING: 'thinking', SPEAKING: 'speaking' };
 let currentState = State.IDLE;
 let ws = null;
 let recognition = null;
 let currentPersona = '';
 let isMicActive = false;
 
-/* ===== DOM 참조 ===== */
-const $ = (id) => document.getElementById(id);
-const orbContainer = $('orbContainer');
-const orbIcon = $('orbIcon');
-const stateLabel = $('stateLabel');
-const micBtn = $('micBtn');
-const responseText = $('responseText');
-const transcript = $('transcript');
-const sessionLog = $('sessionLog');
-const statusDot = $('statusDot');
-const statusText = $('statusText');
+/* ===== DOM ===== */
+const $ = id => document.getElementById(id);
+const orbContainer  = $('orbContainer');
+const orbIcon       = $('orbIcon');
+const stateLabel    = $('stateLabel');
+const micBtn        = $('micBtn');
+const responseText  = $('responseText');
+const transcript    = $('transcript');
+const sessionLog    = $('sessionLog');
+const statusDot     = $('statusDot');
+const statusText    = $('statusText');
 const personaSelect = $('personaSelect');
-const bookSelect = $('bookSelect');
-const initBtn = $('initBtn');
+const bookSelect    = $('bookSelect');
+const initBtn       = $('initBtn');
+const waveformEl    = $('waveform');
 
-/* ===== 상태 아이콘 맵 ===== */
-const stateIcons = {
-  [State.IDLE]: '◈',
-  [State.LISTENING]: '◉',
-  [State.THINKING]: '◌',
-  [State.SPEAKING]: '◆',
-};
-const stateLabels = {
-  [State.IDLE]: '대기 중',
-  [State.LISTENING]: '듣는 중...',
-  [State.THINKING]: '생각 중...',
-  [State.SPEAKING]: '말하는 중...',
-};
+/* ===== 상태 맵 ===== */
+const stateIcons   = { idle:'◈', listening:'◉', thinking:'◌', speaking:'◆' };
+const stateLabels  = { idle:'대기 중', listening:'듣는 중...', thinking:'생각 중...', speaking:'말하는 중...' };
 
-/* ===== UI 상태 변경 ===== */
+/* ===== 원형 파형 (Speaking) ===== */
+const NS          = 'http://www.w3.org/2000/svg';
+const WAVE_N      = 28;      // 바 개수
+const WAVE_R_IN   = 68;      // 오브 엣지 (반지름 60 + 8 여백)
+const WAVE_CX     = 140;
+const WAVE_CY     = 140;
+
+let cWaveData     = [];      // [{line, angle, x1, y1, phase, speed}]
+let speakingRaf   = null;
+
+function createCircularWave() {
+  const svg = document.createElementNS(NS, 'svg');
+  svg.setAttribute('class', 'circular-wave');
+  svg.setAttribute('id', 'circularWave');
+  svg.setAttribute('viewBox', '0 0 280 280');
+
+  cWaveData = [];
+  for (let i = 0; i < WAVE_N; i++) {
+    const angle = (i / WAVE_N) * Math.PI * 2 - Math.PI / 2;
+    const x1 = WAVE_CX + WAVE_R_IN * Math.cos(angle);
+    const y1 = WAVE_CY + WAVE_R_IN * Math.sin(angle);
+
+    const line = document.createElementNS(NS, 'line');
+    line.setAttribute('x1', x1.toFixed(2));
+    line.setAttribute('y1', y1.toFixed(2));
+    line.setAttribute('x2', x1.toFixed(2));
+    line.setAttribute('y2', y1.toFixed(2));
+    line.setAttribute('stroke-width', '2.5');
+    line.setAttribute('stroke-linecap', 'round');
+    line.setAttribute('stroke', 'rgba(0,120,255,0.4)');
+    svg.appendChild(line);
+
+    cWaveData.push({
+      line, angle, x1, y1,
+      phase: Math.random() * Math.PI * 2,
+      speed: 1.8 + Math.random() * 3.2,
+    });
+  }
+  orbContainer.appendChild(svg);
+}
+
+function animateSpeaking(ts) {
+  const t = ts / 1000;
+  cWaveData.forEach(({ line, angle, x1, y1, phase, speed }, i) => {
+    // 여러 사인파 겹침 → 유기적 파형
+    const h = 5
+      + 16 * Math.abs(Math.sin(t * speed       + phase))
+      + 9  * Math.abs(Math.sin(t * speed * 0.55 + phase + 1.4))
+      + 4  * Math.abs(Math.sin(t * 1.3          + i * 0.35));
+
+    const r   = WAVE_R_IN + h;
+    line.x2.baseVal.value = WAVE_CX + r * Math.cos(angle);
+    line.y2.baseVal.value = WAVE_CY + r * Math.sin(angle);
+
+    // 높이에 따라 dim-blue → bright-cyan
+    const v     = Math.min(h / 29, 1);
+    const red   = Math.round(v * 60);
+    const green = Math.round(120 + v * 92);
+    const alpha = (0.35 + v * 0.6).toFixed(2);
+    line.setAttribute('stroke', `rgba(${red},${green},255,${alpha})`);
+  });
+  speakingRaf = requestAnimationFrame(animateSpeaking);
+}
+
+function startSpeakingAnim() {
+  cancelAnimationFrame(speakingRaf);
+  speakingRaf = requestAnimationFrame(animateSpeaking);
+}
+
+function stopSpeakingAnim() {
+  cancelAnimationFrame(speakingRaf);
+  speakingRaf = null;
+  // 바 초기화
+  cWaveData.forEach(({ line, x1, y1 }) => {
+    line.x2.baseVal.value = x1;
+    line.y2.baseVal.value = y1;
+  });
+}
+
+/* ===== 마이크 시각화 (Listening) — Web Audio API ===== */
+let audioCtx    = null;
+let analyserNode = null;
+let micStream   = null;
+let micRaf      = null;
+
+async function startMicVisualization() {
+  try {
+    micStream    = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
+    audioCtx     = new (window.AudioContext || window.webkitAudioContext)();
+    analyserNode = audioCtx.createAnalyser();
+    analyserNode.fftSize = 64;
+    audioCtx.createMediaStreamSource(micStream).connect(analyserNode);
+
+    const freq = new Uint8Array(analyserNode.frequencyBinCount);
+    const bars = waveformEl.querySelectorAll('span');
+
+    function tick() {
+      if (currentState !== State.LISTENING) return;
+      analyserNode.getByteFrequencyData(freq);
+      bars.forEach((bar, i) => {
+        const v = freq[Math.floor(i * freq.length / bars.length)];
+        bar.style.height = Math.max(5, v / 5.5) + 'px';
+      });
+      micRaf = requestAnimationFrame(tick);
+    }
+    tick();
+  } catch {
+    // CSS fallback — 아무것도 안 해도 CSS animation이 돌고 있음
+  }
+}
+
+function stopMicVisualization() {
+  cancelAnimationFrame(micRaf);
+  micRaf = null;
+  if (micStream)  { micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+  if (audioCtx)   { audioCtx.close().catch(() => {}); audioCtx = null; }
+  waveformEl.querySelectorAll('span').forEach(b => { b.style.height = ''; });
+}
+
+/* ===== setState ===== */
 function setState(state) {
+  const prev   = currentState;
   currentState = state;
   orbContainer.className = 'orb-container ' + state;
-  orbIcon.textContent = stateIcons[state];
+  orbIcon.textContent    = stateIcons[state];
   stateLabel.textContent = stateLabels[state];
 
+  if (state === State.SPEAKING) {
+    startSpeakingAnim();
+    if (prev === State.LISTENING) stopMicVisualization();
+  } else {
+    stopSpeakingAnim();
+    if (state !== State.LISTENING && prev === State.LISTENING) stopMicVisualization();
+  }
+
   if (state === State.THINKING) {
-    responseText.textContent = '...';
     responseText.className = 'response-text thinking';
     const dots = ['...', '· · ·', '·  ·  ·'];
     let i = 0;
@@ -61,16 +173,15 @@ function setState(state) {
   }
 }
 
-/* ===== 로그 추가 ===== */
+/* ===== 로그 / 트랜스크립트 ===== */
 function addLog(text, type = '') {
-  const entry = document.createElement('div');
-  entry.className = 'log-entry ' + type;
-  entry.textContent = `> ${text}`;
-  sessionLog.appendChild(entry);
+  const e = document.createElement('div');
+  e.className = 'log-entry ' + type;
+  e.textContent = `> ${text}`;
+  sessionLog.appendChild(e);
   sessionLog.scrollTop = sessionLog.scrollHeight;
 }
 
-/* ===== 트랜스크립트 추가 ===== */
 function addMessage(role, text) {
   const msg = document.createElement('div');
   msg.className = 'msg ' + role;
@@ -80,7 +191,7 @@ function addMessage(role, text) {
   transcript.scrollTop = transcript.scrollHeight;
 }
 
-/* ===== WebSocket 연결 ===== */
+/* ===== WebSocket ===== */
 function connectWS() {
   ws = new WebSocket(`ws://${location.host}`);
 
@@ -90,7 +201,6 @@ function connectWS() {
     addLog('서버 연결 완료', 'system');
     loadOptions();
   };
-
   ws.onclose = () => {
     statusDot.className = 'status-dot error';
     statusText.textContent = '연결 끊김';
@@ -99,15 +209,12 @@ function connectWS() {
     micBtn.disabled = true;
     setTimeout(connectWS, 3000);
   };
-
   ws.onerror = () => {
     statusDot.className = 'status-dot error';
     statusText.textContent = '연결 오류';
   };
-
   ws.onmessage = (event) => {
     const msg = JSON.parse(event.data);
-
     if (msg.type === 'ready') {
       addLog(msg.message, 'system');
       micBtn.disabled = false;
@@ -115,15 +222,8 @@ function connectWS() {
       responseText.textContent = '말하기 버튼을 눌러 대화를 시작하세요.';
       responseText.className = 'response-text';
     }
-
-    if (msg.type === 'thinking') {
-      setState(State.THINKING);
-    }
-
-    if (msg.type === 'response') {
-      handleResponse(msg.text);
-    }
-
+    if (msg.type === 'thinking') setState(State.THINKING);
+    if (msg.type === 'response') handleResponse(msg.text);
     if (msg.type === 'error') {
       setState(State.IDLE);
       responseText.textContent = '⚠ ' + msg.message;
@@ -140,17 +240,15 @@ async function loadOptions() {
       fetch('/api/personas').then(r => r.json()),
       fetch('/api/books').then(r => r.json()),
     ]);
-
     personas.forEach(p => {
-      const opt = document.createElement('option');
-      opt.value = p.id; opt.textContent = p.name;
-      personaSelect.appendChild(opt);
+      const o = document.createElement('option');
+      o.value = p.id; o.textContent = p.name;
+      personaSelect.appendChild(o);
     });
-
     books.forEach(b => {
-      const opt = document.createElement('option');
-      opt.value = b.id; opt.textContent = b.name;
-      bookSelect.appendChild(opt);
+      const o = document.createElement('option');
+      o.value = b.id; o.textContent = b.name;
+      bookSelect.appendChild(o);
     });
   } catch (err) {
     addLog('옵션 로드 실패: ' + err.message);
@@ -165,17 +263,10 @@ initBtn.addEventListener('click', () => {
     responseText.className = 'response-text error';
     return;
   }
-
   currentPersona = persona;
   transcript.innerHTML = '';
   sessionLog.innerHTML = '';
-
-  ws.send(JSON.stringify({
-    type: 'init',
-    persona,
-    book: bookSelect.value,
-  }));
-
+  ws.send(JSON.stringify({ type: 'init', persona, book: bookSelect.value }));
   addLog(`세션 초기화: ${persona}`, 'system');
   setState(State.IDLE);
   micBtn.disabled = true;
@@ -183,13 +274,12 @@ initBtn.addEventListener('click', () => {
   responseText.className = 'response-text thinking';
 });
 
-/* ===== 음성 인식 설정 ===== */
+/* ===== 음성 인식 ===== */
 function setupSpeechRecognition() {
   if (!('webkitSpeechRecognition' in window) && !('SpeechRecognition' in window)) {
-    addLog('음성 인식 미지원 브라우저. Chrome을 사용하세요.', 'system');
+    addLog('음성 인식 미지원. Chrome을 사용하세요.', 'system');
     return null;
   }
-
   const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
   const rec = new SpeechRecognition();
   rec.lang = 'ko-KR';
@@ -201,30 +291,25 @@ function setupSpeechRecognition() {
     micBtn.classList.add('active');
     setState(State.LISTENING);
     addLog('듣는 중...');
+    startMicVisualization();
   };
-
   rec.onresult = (e) => {
-    const transcript_text = e.results[0][0].transcript;
-    addLog(`입력: "${transcript_text}"`);
-    addMessage('user', transcript_text);
-    sendMessage(transcript_text);
+    const txt = e.results[0][0].transcript;
+    addLog(`입력: "${txt}"`);
+    addMessage('user', txt);
+    sendMessage(txt);
   };
-
   rec.onerror = (e) => {
     addLog('음성 인식 오류: ' + e.error);
     setState(State.IDLE);
     micBtn.classList.remove('active');
     isMicActive = false;
   };
-
   rec.onend = () => {
     micBtn.classList.remove('active');
     isMicActive = false;
-    if (currentState === State.LISTENING) {
-      setState(State.IDLE);
-    }
+    if (currentState === State.LISTENING) setState(State.IDLE);
   };
-
   return rec;
 }
 
@@ -234,47 +319,37 @@ function sendMessage(text) {
   ws.send(JSON.stringify({ type: 'message', text }));
 }
 
-/* ===== TTS — 브라우저 내장 ===== */
-
-// Chrome은 getVoices()가 비동기로 로드됨 — 준비될 때까지 대기
+/* ===== TTS ===== */
 function getVoicesReady() {
-  return new Promise((resolve) => {
-    const voices = window.speechSynthesis.getVoices();
-    if (voices.length > 0) { resolve(voices); return; }
-    window.speechSynthesis.onvoiceschanged = () => {
-      resolve(window.speechSynthesis.getVoices());
-    };
-    // 2초 안에 안 오면 빈 배열로라도 진행
+  return new Promise(resolve => {
+    const v = window.speechSynthesis.getVoices();
+    if (v.length > 0) { resolve(v); return; }
+    window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
     setTimeout(() => resolve(window.speechSynthesis.getVoices()), 2000);
   });
 }
 
 async function speak(text, onEnd) {
-  // Chrome bug: speechSynthesis가 paused 상태로 걸리는 경우 강제 resume
   window.speechSynthesis.cancel();
   if (window.speechSynthesis.paused) window.speechSynthesis.resume();
 
   const voices = await getVoicesReady();
+  const koVoice  = voices.find(v => v.lang === 'ko-KR' || v.lang === 'ko_KR');
+  const enVoice  = voices.find(v => v.lang.startsWith('en'));
+  const selected = koVoice || enVoice || voices[0] || null;
 
-  // 한국어 → 없으면 en-US → 없으면 첫 번째 음성으로 fallback
-  const koVoice = voices.find(v => v.lang === 'ko-KR' || v.lang === 'ko_KR');
-  const enVoice = voices.find(v => v.lang.startsWith('en'));
-  const selectedVoice = koVoice || enVoice || voices[0] || null;
+  addLog(`TTS: ${selected ? selected.name : '기본값'}`);
 
-  addLog(`TTS 음성: ${selectedVoice ? selectedVoice.name : '기본값'}`);
+  const u = new SpeechSynthesisUtterance(text);
+  if (selected) u.voice = selected;
+  u.lang   = selected ? selected.lang : 'ko-KR';
+  u.rate   = 1.0;
+  u.pitch  = 1.0;
+  u.volume = 1.0;
+  u.onend  = () => { addLog('TTS 완료'); onEnd(); };
+  u.onerror = e => { addLog('TTS 오류: ' + e.error); onEnd(); };
 
-  const utterance = new SpeechSynthesisUtterance(text);
-  if (selectedVoice) utterance.voice = selectedVoice;
-  utterance.lang = selectedVoice ? selectedVoice.lang : 'ko-KR';
-  utterance.rate = 1.0;
-  utterance.pitch = 1.0;
-  utterance.volume = 1.0;
-
-  utterance.onend = () => { addLog('TTS 완료'); onEnd(); };
-  utterance.onerror = (e) => { addLog('TTS 오류: ' + e.error); onEnd(); };
-
-  // Chrome: 약간의 딜레이 없으면 speak()가 묵음 처리되는 경우 있음
-  setTimeout(() => window.speechSynthesis.speak(utterance), 150);
+  setTimeout(() => window.speechSynthesis.speak(u), 150);
 }
 
 /* ===== 응답 처리 ===== */
@@ -282,9 +357,7 @@ async function handleResponse(text) {
   addMessage('assistant', text);
   responseText.textContent = text;
   responseText.className = 'response-text speaking';
-
   setState(State.SPEAKING);
-
   await speak(text, () => {
     setState(State.IDLE);
     responseText.className = 'response-text';
@@ -294,25 +367,14 @@ async function handleResponse(text) {
 /* ===== 마이크 버튼 ===== */
 micBtn.addEventListener('click', () => {
   if (currentState === State.THINKING || currentState === State.SPEAKING) return;
-
-  if (!recognition) {
-    recognition = setupSpeechRecognition();
-  }
-
-  if (isMicActive) {
-    recognition.stop();
-  } else {
-    // Chrome 버그: 음성 목록은 비동기 로드 필요
-    window.speechSynthesis.getVoices();
-    recognition.start();
-  }
+  if (!recognition) recognition = setupSpeechRecognition();
+  if (isMicActive) recognition.stop();
+  else { window.speechSynthesis.getVoices(); recognition.start(); }
 });
 
 /* ===== 초기화 ===== */
 window.addEventListener('load', () => {
-  // 보이스 미리 로드 (Chrome 비동기 로드 대응)
-  window.speechSynthesis.onvoiceschanged = () => {
-    window.speechSynthesis.getVoices();
-  };
+  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
+  createCircularWave();
   connectWS();
 });
