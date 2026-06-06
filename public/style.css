@@ -350,6 +350,33 @@ body {
 .response-text.speaking { color: var(--cyan); }
 .response-text.error { color: #ef4444; }
 
+/* ===== VOICE 세그먼트 컨트롤 ===== */
+.voice-row {
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.voice-label {
+  font-family: var(--font-hud); font-size: 0.55rem; color: var(--text-dim);
+  letter-spacing: 0.1em; width: 38px; flex-shrink: 0;
+}
+.seg-group {
+  display: flex; gap: 2px; flex: 1;
+}
+.seg-btn {
+  flex: 1; padding: 0.32rem 0;
+  background: rgba(0,212,255,0.04);
+  border: 1px solid rgba(0,212,255,0.18);
+  color: var(--text-dim);
+  font-family: var(--font-hud); font-size: 0.6rem;
+  cursor: pointer; transition: all 0.15s;
+}
+.seg-btn:hover { background: rgba(0,212,255,0.12); color: var(--text); border-color: rgba(0,212,255,0.4); }
+.seg-btn.active {
+  background: rgba(0,212,255,0.15);
+  border-color: var(--cyan);
+  color: var(--cyan);
+  box-shadow: 0 0 7px rgba(0,212,255,0.35);
+}
+
 /* ===== 스크롤바 ===== */
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }

@@ -39,6 +39,31 @@
       <button id="initBtn" class="hud-btn"><span>▶ 세션 시작</span></button>
 
       <div class="panel-divider"></div>
+      <div class="panel-label">// VOICE</div>
+
+      <div class="voice-row">
+        <span class="voice-label">SPEED</span>
+        <div class="seg-group" id="rateGroup">
+          <button class="seg-btn" data-idx="0" title="매우 느림">1</button>
+          <button class="seg-btn" data-idx="1" title="느림">2</button>
+          <button class="seg-btn active" data-idx="2" title="보통">3</button>
+          <button class="seg-btn" data-idx="3" title="빠름">4</button>
+          <button class="seg-btn" data-idx="4" title="매우 빠름">5</button>
+        </div>
+      </div>
+
+      <div class="voice-row">
+        <span class="voice-label">PITCH</span>
+        <div class="seg-group" id="pitchGroup">
+          <button class="seg-btn" data-idx="0" title="매우 낮음">1</button>
+          <button class="seg-btn" data-idx="1" title="낮음">2</button>
+          <button class="seg-btn active" data-idx="2" title="보통">3</button>
+          <button class="seg-btn" data-idx="3" title="높음">4</button>
+          <button class="seg-btn" data-idx="4" title="매우 높음">5</button>
+        </div>
+      </div>
+
+      <div class="panel-divider"></div>
       <div class="panel-label">// SESSION LOG</div>
       <div id="sessionLog" class="session-log"></div>
     </aside>

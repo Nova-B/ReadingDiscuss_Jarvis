@@ -28,6 +28,48 @@ app.get('/api/books', (req, res) => {
   res.json(files.map(f => ({ id: f, name: f })));
 });
 
+// TTS 생성 엔드포인트
+app.post('/api/tts', (req, res) => {
+  const { text, rate = '+0%', pitch = '+0Hz' } = req.body;
+  if (!text || !text.trim()) return res.status(400).json({ error: 'text 필요' });
+
+  const proc = spawn('python', [path.join(__dirname, 'tts.py'), rate, pitch], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+
+  const chunks = [];
+  let stderr = '';
+
+  proc.stdin.on('error', err => console.error('TTS stdin 오류:', err.message));
+  proc.stdout.on('data', d => chunks.push(d));
+  proc.stderr.on('data', d => { stderr += d.toString(); });
+
+  proc.stdin.write(text, 'utf-8');
+  proc.stdin.end();
+
+  const timeout = setTimeout(() => {
+    proc.kill();
+    if (!res.headersSent) res.status(500).json({ error: 'TTS 응답 시간 초과' });
+  }, 15000);
+
+  proc.on('close', code => {
+    clearTimeout(timeout);
+    if (res.headersSent) return;
+    if (code === 0 && chunks.length > 0) {
+      res.setHeader('Content-Type', 'audio/mpeg');
+      res.send(Buffer.concat(chunks));
+    } else {
+      console.error('TTS 오류:', stderr);
+      res.status(500).json({ error: 'TTS 생성 실패', detail: stderr.slice(0, 300) });
+    }
+  });
+
+  proc.on('error', err => {
+    clearTimeout(timeout);
+    if (!res.headersSent) res.status(500).json({ error: 'python 실행 실패: ' + err.message });
+  });
+});
+
 // 파일 내용 로드
 function loadFile(filePath) {
   try {

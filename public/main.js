@@ -21,6 +21,8 @@ const personaSelect = $('personaSelect');
 const bookSelect    = $('bookSelect');
 const initBtn       = $('initBtn');
 const waveformEl    = $('waveform');
+const rateGroup     = $('rateGroup');
+const pitchGroup    = $('pitchGroup');
 
 /* ===== 상태 맵 ===== */
 const stateIcons   = { idle:'◈', listening:'◉', thinking:'◌', speaking:'◆' };
@@ -319,37 +321,55 @@ function sendMessage(text) {
   ws.send(JSON.stringify({ type: 'message', text }));
 }
 
-/* ===== TTS ===== */
-function getVoicesReady() {
-  return new Promise(resolve => {
-    const v = window.speechSynthesis.getVoices();
-    if (v.length > 0) { resolve(v); return; }
-    window.speechSynthesis.onvoiceschanged = () => resolve(window.speechSynthesis.getVoices());
-    setTimeout(() => resolve(window.speechSynthesis.getVoices()), 2000);
+/* ===== TTS (edge-tts) ===== */
+const RATE_VALS  = ['-30%', '-15%', '+0%', '+20%', '+40%'];
+const PITCH_VALS = ['-20Hz', '-10Hz', '+0Hz', '+10Hz', '+20Hz'];
+
+let ttsRateIdx  = 2;
+let ttsPitchIdx = 2;
+
+function setActiveSegment(group, idx) {
+  group.querySelectorAll('.seg-btn').forEach((btn, i) => {
+    btn.classList.toggle('active', i === idx);
   });
 }
 
+rateGroup.addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  ttsRateIdx = parseInt(btn.dataset.idx);
+  setActiveSegment(rateGroup, ttsRateIdx);
+});
+
+pitchGroup.addEventListener('click', e => {
+  const btn = e.target.closest('.seg-btn');
+  if (!btn) return;
+  ttsPitchIdx = parseInt(btn.dataset.idx);
+  setActiveSegment(pitchGroup, ttsPitchIdx);
+});
+
 async function speak(text, onEnd) {
-  window.speechSynthesis.cancel();
-  if (window.speechSynthesis.paused) window.speechSynthesis.resume();
-
-  const voices = await getVoicesReady();
-  const koVoice  = voices.find(v => v.lang === 'ko-KR' || v.lang === 'ko_KR');
-  const enVoice  = voices.find(v => v.lang.startsWith('en'));
-  const selected = koVoice || enVoice || voices[0] || null;
-
-  addLog(`TTS: ${selected ? selected.name : '기본값'}`);
-
-  const u = new SpeechSynthesisUtterance(text);
-  if (selected) u.voice = selected;
-  u.lang   = selected ? selected.lang : 'ko-KR';
-  u.rate   = 1.0;
-  u.pitch  = 1.0;
-  u.volume = 1.0;
-  u.onend  = () => { addLog('TTS 완료'); onEnd(); };
-  u.onerror = e => { addLog('TTS 오류: ' + e.error); onEnd(); };
-
-  setTimeout(() => window.speechSynthesis.speak(u), 150);
+  try {
+    const res = await fetch('/api/tts', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, rate: RATE_VALS[ttsRateIdx], pitch: PITCH_VALS[ttsPitchIdx] }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.error || `서버 오류 ${res.status}`);
+    }
+    const blob  = await res.blob();
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => { URL.revokeObjectURL(url); addLog('TTS 완료'); onEnd(); };
+    audio.onerror = () => { URL.revokeObjectURL(url); addLog('TTS 재생 오류'); onEnd(); };
+    audio.play();
+    addLog(`TTS: edge-tts | 속도 ${RATE_VALS[ttsRateIdx]} | 음높이 ${PITCH_VALS[ttsPitchIdx]}`);
+  } catch (err) {
+    addLog('TTS 오류: ' + err.message);
+    onEnd();
+  }
 }
 
 /* ===== 응답 처리 ===== */
@@ -369,12 +389,11 @@ micBtn.addEventListener('click', () => {
   if (currentState === State.THINKING || currentState === State.SPEAKING) return;
   if (!recognition) recognition = setupSpeechRecognition();
   if (isMicActive) recognition.stop();
-  else { window.speechSynthesis.getVoices(); recognition.start(); }
+  else recognition.start();
 });
 
 /* ===== 초기화 ===== */
 window.addEventListener('load', () => {
-  window.speechSynthesis.onvoiceschanged = () => window.speechSynthesis.getVoices();
   createCircularWave();
   connectWS();
 });
